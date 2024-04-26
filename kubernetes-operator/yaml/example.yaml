@@ -1,0 +1,9 @@
+apiVersion: kubernetes.in4it.com/v1
+kind: StaticPage
+metadata:
+  name: testpage
+  namespace: default
+spec:
+  image: nginx:latest
+  contents: this is a test
+  replicas: 1
