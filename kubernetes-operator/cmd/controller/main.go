@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,11 +11,12 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -51,7 +53,7 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	var staticPage in4itv1.StaticPage
 	err := r.Client.Get(ctx, req.NamespacedName, &staticPage)
 	if err != nil {
-		if errors.IsNotFound(err) { // staticpage not found, we can delete the resources
+		if k8serrors.IsNotFound(err) { // staticpage not found, we can delete the resources
 			err = deploymentsClient.Delete(ctx, staticPageName, metav1.DeleteOptions{})
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("couldn't delete deployment: %s", err)
@@ -67,10 +69,10 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	deployment, err := deploymentsClient.Get(ctx, staticPageName, metav1.GetOptions{})
 	if err != nil {
-		if errors.IsNotFound(err) {
+		if k8serrors.IsNotFound(err) {
 			cmObj := getConfigMapObject(staticPageName, staticPage.Spec.Contents)
 			_, err = cmClient.Create(ctx, cmObj, metav1.CreateOptions{})
-			if err != nil && !errors.IsAlreadyExists(err) {
+			if err != nil && !k8serrors.IsAlreadyExists(err) {
 				return ctrl.Result{}, fmt.Errorf("couldn't create configmap: %s", err)
 			}
 
@@ -103,9 +105,21 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 func main() {
-	config, err := clientcmd.BuildConfigFromFlags("", filepath.Join(homedir.HomeDir(), ".kube", "config"))
-	if err != nil {
-		panic(err.Error())
+	var (
+		config *rest.Config
+		err    error
+	)
+	kubeconfigFilePath := filepath.Join(homedir.HomeDir(), ".kube", "config")
+	if _, err := os.Stat(kubeconfigFilePath); errors.Is(err, os.ErrNotExist) { // if kube config doesn't exist, try incluster config
+		config, err = rest.InClusterConfig()
+		if err != nil {
+			panic(err.Error())
+		}
+	} else {
+		config, err = clientcmd.BuildConfigFromFlags("", kubeconfigFilePath)
+		if err != nil {
+			panic(err.Error())
+		}
 	}
 
 	// kubernetes client set
